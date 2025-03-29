@@ -27,7 +27,7 @@ def get_parameters():
     shift_availability = {}
     shift_regular_time = {}
     shift_extra_time = {}
-    # New dictionary: per shift minimum workers (default = 4)
+    # Per shift minimum workers (default = 4)
     min_workers_dict = {}
 
     with st.sidebar.expander("Shift Scheduler and Configuration"):
@@ -43,7 +43,7 @@ def get_parameters():
                 availability = st.checkbox(f"{shift} Shift Open", value=default_val, key=f"{day}_{shift}_open")
                 shift_availability[(day, shift)] = availability
 
-                # New: Minimum workers required for this shift.
+                # Minimum workers required for this shift.
                 if availability:
                     min_workers = st.number_input(
                         f"Minimum workers for {day} {shift}",
@@ -54,7 +54,7 @@ def get_parameters():
                 min_workers_dict[(day, shift)] = min_workers
 
                 st.markdown(f"**{shift} Shift Time Configuration**")
-                # Let the user choose the opening hours by selecting a start and end time.
+                # Let the user choose the opening hours.
                 start_time = st.time_input(
                     f"{day} {shift} Start Time",
                     value=default_times[shift][0],
@@ -72,8 +72,7 @@ def get_parameters():
                 total_minutes = (dt_end - dt_start).seconds // 60
                 total_quarters = total_minutes // 15
 
-                # If the shift duration is more than 4 hours (16 quarters),
-                # use 4 hours as regular time and the remainder as extra time.
+                # Use 4 hours as regular time; remainder is extra time.
                 if total_quarters > 16:
                     shift_regular_time[(day, shift)] = 16
                     shift_extra_time[(day, shift)] = total_quarters - 16
@@ -82,7 +81,6 @@ def get_parameters():
                     shift_extra_time[(day, shift)] = 0
 
     st.sidebar.subheader("Customer Count")
-    # --- Shift Forecasts (in a collapsible expander) ---
     with st.sidebar.expander("Shift Forecasts (Customer Count)"):
         shift_forecasts = {}
         for day in day_names:
@@ -103,15 +101,20 @@ def get_parameters():
     contract_hours = []
     conversion_rate = []
     extra_cost = []
-    max_morning_shifts = []
-    max_afternoon_shifts = []
-    worker_max_extra_hours = []  # Worker-specific maximum extra hours allowed (in hours)
-    leave_requests = []  # Each worker gets a dictionary: keys (day, shift) -> bool.
+    leave_requests = []
+    is_special_worker = []  # Mark special workers.
+    
     st.sidebar.markdown("Set the following for each worker:")
     for worker in worker_names:
         with st.sidebar.expander(f"{worker}"):
+            # Mark worker as special.
+            special = st.checkbox(f"{worker} is a Special Worker", value=False, key=f"{worker}_special")
+            is_special_worker.append(special)
+            
+            # For special workers, contract hours represent a maximum limit.
+            default_contract = 36 if not special else 10
             ch = st.number_input(
-                f"{worker} Contract Hours", value=36, min_value=0, step=1, key=f"{worker}_contract"
+                f"{worker} Contract Hours", value=default_contract, min_value=0, step=1, key=f"{worker}_contract"
             )
             cr = st.number_input(
                 f"{worker} Conversion Rate ($ per customer)", value=100, min_value=0, step=1, key=f"{worker}_conv"
@@ -119,20 +122,7 @@ def get_parameters():
             ec = st.number_input(
                 f"{worker} Extra Cost ($ per extra hour)", value=15, min_value=0, step=1, key=f"{worker}_cost"
             )
-            # Maximum shifts allowed.
-            morning_open_count = sum(1 for day in day_names if shift_availability[(day, "Morning")])
-            afternoon_open_count = sum(1 for day in day_names if shift_availability[(day, "Afternoon")])
-            max_am = st.number_input(
-                f"{worker} Max Morning Shifts", value=morning_open_count, min_value=0, max_value=morning_open_count, step=1, key=f"{worker}_max_am"
-            )
-            max_pm = st.number_input(
-                f"{worker} Max Afternoon Shifts", value=afternoon_open_count, min_value=0, max_value=afternoon_open_count, step=1, key=f"{worker}_max_pm"
-            )
-            # Worker-specific maximum extra hours allowed.
-            max_extra = st.number_input(
-                f"{worker} Maximum Extra Hours", value=10.0, min_value=0.0, step=0.5, key=f"{worker}_max_extra"
-            )
-            # Leave requests: allow marking days/shifts the worker is unavailable.
+            # Leave requests: mark days/shifts the worker is unavailable.
             leave = {}
             st.markdown("Leave Requests:")
             for day in day_names:
@@ -143,20 +133,14 @@ def get_parameters():
             contract_hours.append(ch)
             conversion_rate.append(cr)
             extra_cost.append(ec)
-            max_morning_shifts.append(max_am)
-            max_afternoon_shifts.append(max_pm)
-            worker_max_extra_hours.append(max_extra)
             leave_requests.append(leave)
 
-    # Return the new min_workers_dict variable along with the other parameters.
     return (worker_names, shift_availability, shift_regular_time, shift_extra_time, shift_forecasts, 
-            contract_hours, conversion_rate, extra_cost, max_morning_shifts, max_afternoon_shifts, 
-            leave_requests, worker_max_extra_hours, min_workers_dict)
+            contract_hours, conversion_rate, extra_cost, leave_requests, min_workers_dict, is_special_worker)
 
 
 def solve_schedule(worker_names, shift_availability, shift_regular_time, shift_extra_time, shift_forecasts, contract_hours, 
-                   conversion_rate, extra_cost, max_morning_shifts, max_afternoon_shifts, leave_requests, worker_max_extra_hours,
-                   min_workers_dict):
+                   conversion_rate, extra_cost, leave_requests, min_workers_dict, is_special_worker):
     num_workers = len(worker_names)
     day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     shift_names = ["Morning", "Afternoon"]
@@ -164,7 +148,7 @@ def solve_schedule(worker_names, shift_availability, shift_regular_time, shift_e
     
     model = cp_model.CpModel()
     
-    # Decision variables: shifts[(n, d, s)] = 1 if worker n works on day d, shift s.
+    # Decision variables: shifts[(n, d, s)] is 1 if worker n works on day d, shift s.
     shifts = {}
     for n in range(num_workers):
         for d in range(num_days):
@@ -175,14 +159,14 @@ def solve_schedule(worker_names, shift_availability, shift_regular_time, shift_e
                 else:
                     shifts[(n, d, s)] = model.NewBoolVar(f"shift_n{n}_d{d}_{s}")
     
-    # Enforce leave requests for each worker.
+    # Enforce leave requests.
     for n in range(num_workers):
         for d in range(num_days):
             for s in shift_names:
                 if leave_requests[n][(day_names[d], s)]:
                     model.Add(shifts[(n, d, s)] == 0)
     
-    # For each open shift, enforce a minimum number of workers using the per-shift min_workers.
+    # Enforce minimum workers per open shift.
     worker_count = {}
     for d in range(num_days):
         for s in shift_names:
@@ -208,27 +192,31 @@ def solve_schedule(worker_names, shift_availability, shift_regular_time, shift_e
         regular_work_time[n] = sum(reg_time_expr)
         extra_work_time[n] = sum(extra_time_expr)
         
-        # Ensure the worker meets contract hours using regular time.
         contract_quarters = int(contract_hours[n] * 4)
-        model.Add(regular_work_time[n] >= contract_quarters)
-        
-        # Calculate the total extra time as the sum of:
-        # 1) Any regular work done beyond the contract hours.
-        # 2) The extra work time from extra time shifts.
-        # Enforce that this sum does not exceed the worker's maximum extra hours.
-        extra_allowable = int(worker_max_extra_hours[n] * 4)
-        model.Add((regular_work_time[n] - contract_quarters) + extra_work_time[n] <= extra_allowable)
+        # For non-special workers, enforce equality.
+        if not is_special_worker[n]:
+            model.Add(regular_work_time[n] == contract_quarters)
+        else:
+            # For special workers, regular work time must not exceed the maximum.
+            model.Add(regular_work_time[n] <= contract_quarters)
     
     # Revenue (per customer conversion) minus extra cost penalty.
+    extra_cost_per_increment = [c / 4 for c in extra_cost]  # cost per quarter increment.
+    special_worker_penalty = 1000  # High penalty to discourage use unless necessary.
+    
     revenue = sum(
         shift_forecasts[(day_names[d], s)] * conversion_rate[n] * shifts[(n, d, s)]
         for n in range(num_workers) for d in range(num_days) for s in shift_names
     )
-    extra_cost_per_increment = [c / 4 for c in extra_cost]  # cost per quarter increment.
     extra_cost_penalty = sum(
         extra_cost_per_increment[n] * extra_work_time[n] for n in range(num_workers)
     )
-    model.Maximize(revenue - extra_cost_penalty)
+    special_penalty = sum(
+        special_worker_penalty * shifts[(n, d, s)]
+        for n in range(num_workers) if is_special_worker[n]
+        for d in range(num_days) for s in shift_names if shift_availability[(day_names[d], s)]
+    )
+    model.Maximize(revenue - extra_cost_penalty - special_penalty)
     
     # Solve the model.
     solver = cp_model.CpSolver()
@@ -253,19 +241,16 @@ def solve_schedule(worker_names, shift_availability, shift_regular_time, shift_e
             contract_quarters = int(contract_hours[n] * 4)
             reg_increments = solver.Value(regular_work_time[n])
             extra_increments = solver.Value(extra_work_time[n])
-            # Compute overtime as the regular work beyond contract plus extra shift time.
-            overtime_quarters = max(reg_increments - contract_quarters, 0) + extra_increments
+            # Overtime is defined as the extra work time.
             worker_summary.append({
                 "Worker": worker_names[n],
                 "Contract Hours": contract_hours[n],
                 "Regular Hours Worked": reg_increments / 4.0,
-                "Extra Hours Worked": overtime_quarters / 4.0,
-                "Total Hours Worked": reg_increments / 4.0 + overtime_quarters / 4.0
+                "Extra Hours Worked": extra_increments / 4.0,
+                "Total Hours Worked": (reg_increments + extra_increments) / 4.0
             })
         
-        statistics = {
-            "Revenue": solver.ObjectiveValue(),
-        }
+        statistics = {"Revenue": solver.ObjectiveValue()}
         return schedule, worker_summary, statistics
     else:
         return None, None, None
@@ -277,7 +262,6 @@ def create_timetable(schedule):
     """
     day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     shift_names = ["Morning", "Afternoon"]
-    
     timetable_data = {day: [] for day in day_names}
     
     for day in day_names:
@@ -296,11 +280,9 @@ def render_calendar_for_worker(schedule, day_names, shift_names, worker_names):
     Build an HTML table with:
     - Rows = workers
     - Columns = days
-    - Each cell has zero or more 'pills' (one per assigned shift).
+    - Each cell shows pills for each assigned shift.
     """
-    worker_day_assignments = {
-        worker: {day: [] for day in day_names} for worker in worker_names
-    }
+    worker_day_assignments = {worker: {day: [] for day in day_names} for worker in worker_names}
     for day in day_names:
         if day not in schedule:
             continue
@@ -309,29 +291,21 @@ def render_calendar_for_worker(schedule, day_names, shift_names, worker_names):
             for w in assigned_workers:
                 worker_day_assignments[w][day].append(shift)
     
-    html = []
-    html.append('<table class="calendar-table">')
-    html.append('<thead>')
-    html.append('<tr>')
-    html.append('<th class="calendar-header"></th>')
+    html = ['<table class="calendar-table">', '<thead>', '<tr>', '<th class="calendar-header"></th>']
     for day in day_names:
         html.append(f'<th class="calendar-header">{day}</th>')
-    html.append('</tr>')
-    html.append('</thead>')
-    html.append('<tbody>')
+    html.extend(['</tr>', '</thead>', '<tbody>'])
     for worker in worker_names:
         html.append('<tr>')
         html.append(f'<td class="worker-name-cell">{worker}</td>')
         for day in day_names:
-            shifts_for_day = worker_day_assignments[worker][day]
             cell_html = ""
-            for shift in shifts_for_day:
+            for shift in worker_day_assignments[worker][day]:
                 pill_class = "morning-pill" if shift == "Morning" else "afternoon-pill"
                 cell_html += f'<div class="shift-pill {pill_class}">{shift}</div>'
             html.append(f'<td>{cell_html}</td>')
         html.append('</tr>')
-    html.append('</tbody>')
-    html.append('</table>')
+    html.extend(['</tbody>', '</table>'])
     return "\n".join(html)
 
 def render_calendar_for_employer(schedule, day_names, shift_names, worker_names):
@@ -346,34 +320,25 @@ def render_calendar_for_employer(schedule, day_names, shift_names, worker_names)
         return f"hsl({hue}, 70%, 50%)"
     
     worker_colors = {worker: generate_color(i, len(worker_names)) for i, worker in enumerate(worker_names)}
-    
-    html = []
-    html.append('<table class="calendar-table">')
-    html.append('<thead>')
-    html.append('<tr>')
-    html.append('<th class="calendar-header"></th>')
-    for day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
+    html = ['<table class="calendar-table">', '<thead>', '<tr>', '<th class="calendar-header"></th>']
+    for day in day_names:
         html.append(f'<th class="calendar-header">{day}</th>')
-    html.append('</tr>')
-    html.append('</thead>')
-    html.append('<tbody>')
+    html.extend(['</tr>', '</thead>', '<tbody>'])
     for shift in shift_names:
         html.append('<tr>')
         html.append(f'<td class="worker-name-cell">{shift}</td>')
-        for day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
+        for day in day_names:
             assigned_workers = schedule.get(day, {}).get(shift, [])
             if assigned_workers:
                 pills_html = ""
                 for worker in assigned_workers:
                     color = worker_colors.get(worker, "#607d8b")
-                    pill_html = f'<div class="shift-box" style="background-color: {color};">{worker}</div>'
-                    pills_html += pill_html
+                    pills_html += f'<div class="shift-box" style="background-color: {color};">{worker}</div>'
                 html.append(f'<td>{pills_html}</td>')
             else:
                 html.append('<td></td>')
         html.append('</tr>')
-    html.append('</tbody>')
-    html.append('</table>')
+    html.extend(['</tbody>', '</table>'])
     return "\n".join(html)
 
 CALENDAR_CSS = """
@@ -437,31 +402,28 @@ def main():
     st.markdown(
         """
         This interactive web platform uses **Google OR-Tools** to compute an optimal shift schedule for your shop.
-        Adjust the global settings (shift availability, time configuration, and worker parameters) as well as each worker’s hard constraints (leaves and max shifts).
-        Once you click **Solve Schedule**, the model is solved and the timetable, worker summary, and solver statistics are displayed.
+        Adjust the global settings (shift availability, time configuration, and worker parameters) as well as each worker’s hard constraints (leaves).
+        Click **Solve Schedule** to view the timetable, worker summary, and solver statistics.
         """
     )
     
     # Get all parameters from the sidebar.
     (worker_names, shift_availability, shift_regular_time, shift_extra_time, shift_forecasts, 
-     contract_hours, conversion_rate, extra_cost, max_morning_shifts, max_afternoon_shifts, 
-     leave_requests, worker_max_extra_hours, min_workers_dict) = get_parameters()
+     contract_hours, conversion_rate, extra_cost, leave_requests, min_workers_dict, is_special_worker) = get_parameters()
     
     if st.button("Solve Schedule"):
         with st.spinner("Solving the optimization model..."):
             schedule, worker_summary, statistics = solve_schedule(
                 worker_names, shift_availability, shift_regular_time, shift_extra_time, shift_forecasts, contract_hours,
-                conversion_rate, extra_cost, max_morning_shifts, max_afternoon_shifts, leave_requests, worker_max_extra_hours,
-                min_workers_dict
+                conversion_rate, extra_cost, leave_requests, min_workers_dict, is_special_worker
             )
         if schedule:
             st.success("Optimal schedule found!")
-            
-            # Inject CSS.
             st.markdown(CALENDAR_CSS, unsafe_allow_html=True)
             
             day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
             shift_names = ["Morning", "Afternoon"]
+            
             st.header("Calendar View (Workers as Rows)")
             calendar_html_v1 = render_calendar_for_worker(schedule, day_names, shift_names, worker_names)
             st.markdown(calendar_html_v1, unsafe_allow_html=True)
@@ -482,9 +444,11 @@ def main():
 if __name__ == '__main__':
     main()
 
+# To add a bonus (special) worker:
+#   - Mark the worker as special using the new checkbox.
+#   - Their contract hours now represent the maximum hours they can work (default is 10).
+#   - A high penalty is applied for every shift they cover, so they are only used to fill gaps.
 
-
-# max extra hour -> set high to prevent no optimal solution
 
 # to add a bonus worker, just set:
 #  - contract hours = 0
