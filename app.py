@@ -211,12 +211,8 @@ def solve_schedule(worker_names, shift_availability, shift_regular_time, shift_e
     extra_cost_penalty = sum(
         extra_cost_per_increment[n] * extra_work_time[n] for n in range(num_workers)
     )
-    special_penalty = sum(
-        special_worker_penalty * shifts[(n, d, s)]
-        for n in range(num_workers) if is_special_worker[n]
-        for d in range(num_days) for s in shift_names if shift_availability[(day_names[d], s)]
-    )
-    model.Maximize(revenue - extra_cost_penalty - special_penalty)
+    
+    model.Maximize(revenue - extra_cost_penalty)
     
     # Solve the model.
     solver = cp_model.CpSolver()
