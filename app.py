@@ -159,6 +159,46 @@ def get_parameters():
     return (worker_names, SHIFT_NAMES, shift_availability, shift_regular_time, shift_extra_time, shift_forecasts, 
             contract_hours, conversion_rate, extra_cost, leave_requests, min_workers_dict, is_special_worker)
 
+
+def compute_next_week_off_for_worker(worker, schedule, shift_availability, day_names, shift_names, max_consec):
+    # Build the worker's shift assignment list for the week (0 = off, 1 = work)
+    shift_slots = []
+    for day in day_names:
+        for shift in shift_names:
+            # If the shift is open, then check the assignment; if closed, treat it as off.
+            if shift_availability.get((day, shift), False):
+                # schedule[day][shift] is a list of workers assigned on that day and shift.
+                shift_slots.append(1 if worker in schedule.get(day, {}).get(shift, []) else 0)
+            else:
+                shift_slots.append(0)
+    
+    # Count the consecutive shifts (1's) from the end of the week.
+    L = 0
+    for val in reversed(shift_slots):
+        if val == 1:
+            L += 1
+        else:
+            break
+
+    # Determine the (1-indexed) position of the forced off shift next week.
+    next_week_off_slot = max_consec - L + 1
+
+    # Convert this slot number into day and shift for next week.
+    # (Assuming next week has the same order as the current week.)
+    slots_per_week = len(day_names) * len(shift_names)
+    if next_week_off_slot > slots_per_week:
+        # If the slot number is beyond the week length, no forced rest within a week.
+        return "No forced rest within week"
+    # Convert to 0-indexed.
+    slot_index = next_week_off_slot - 1
+    next_day_index = slot_index // len(shift_names)
+    next_shift_index = slot_index % len(shift_names)
+    next_day = day_names[next_day_index]
+    next_shift = shift_names[next_shift_index]
+    return f"{next_day} {next_shift}"
+
+
+
 def solve_schedule(worker_names, shift_names, shift_availability, shift_regular_time, shift_extra_time, shift_forecasts, 
                    contract_hours, conversion_rate, extra_cost, leave_requests, min_workers_dict, is_special_worker):
     num_workers = len(worker_names)
@@ -273,11 +313,28 @@ def solve_schedule(worker_names, shift_names, shift_availability, shift_regular_
                 "Extra Hours Worked": extra_increments / 4.0,
                 "Total Hours Worked": (reg_increments + extra_increments) / 4.0
             })
+
+        # ---- In your solve_schedule() function after building worker_summary: ----
+        for n in range(num_workers):
+            # Rebuild the worker's shift assignments for the current week.
+            # (Note: Use the same ordering as when defining the CP model.)
+            # Here day_names is ["Monday", "Tuesday", ..., "Sunday"].
+            next_week_off = compute_next_week_off_for_worker(
+                worker_names[n],
+                schedule,
+                shift_availability,
+                day_names,
+                shift_names,
+                MAX_CONSECUTIVE_SHIFTS
+            )
+            worker_summary[n]["Min Next Week Off"] = next_week_off
         
         statistics = {"Revenue": solver.ObjectiveValue()}
         return schedule, worker_summary, statistics
     else:
         return None, None, None
+    
+
 
 def create_timetable(schedule, shift_names):
     """
@@ -425,7 +482,7 @@ def main():
     st.title("Shop Shift Scheduling Optimization")
     st.markdown(
         """
-        This interactive web platform uses **Google OR-Tools** to compute an optimal shift schedule for your shop.
+        This interactive web platform uses a proprietary algorithm to compute an optimal shift schedule for your shop.
         Adjust the global settings (shift availability, time configuration, worker parameters) as well as each worker’s hard constraints (leaves).
         Click **Solve Schedule** to view the timetable, worker summary, and solver statistics.
         """
