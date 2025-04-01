@@ -312,7 +312,7 @@ def get_parameters():
     # --- Worker Parameters (Configured via the sidebar) ---
     worker_names_str = st.sidebar.text_input(
         "Worker Names (comma separated)",
-        "Chiara, Elisabetta, Erika, Claudia, Kety, Luana"
+        "Chiara, Elisabetta, Erika, Claudia, Kety, Luana, Irene, Michela"
     )
     worker_names = [w.strip() for w in worker_names_str.split(",") if w.strip()]
 
@@ -390,92 +390,62 @@ def get_parameters():
 ##############################################
 # Compute Next Week Off for Worker
 ##############################################
-def compute_next_week_off_for_worker(worker, schedule, shift_availability, day_names, shift_names, shop_names, max_consecutive_shifts):
+def compute_next_week_off_for_worker(worker, schedule, shift_availability, day_names, shift_names, max_consec, shop_names):
     """
-    Computes the maximum number of consecutive days off for the worker.
-    For each day, if the worker is not scheduled in any shop for any shift, the day is off.
-    """
-    off_days = []
-    for day in day_names:
-        working = False
-        for shop in shop_names:
-            if day in schedule.get(shop, {}):
-                for shift in shift_names:
-                    if worker in schedule[shop][day].get(shift, []):
-                        working = True
-                        break
-            if working:
-                break
-        off_days.append(not working)
-    
-    max_consecutive_off = 0
-    current = 0
-    for off in off_days:
-        if off:
-            current += 1
-        else:
-            if current > max_consecutive_off:
-                max_consecutive_off = current
-            current = 0
-    if current > max_consecutive_off:
-        max_consecutive_off = current
-    return max_consecutive_off
+    Computes the next forced off slot (day and shift) for the worker in the next week,
+    based on the worker's current weekly assignments across all shops and the maximum
+    allowed consecutive shifts (max_consec).
 
-def compute_consecutive_shifts_at_end(worker, schedule, day_names, shift_names, shop_names):
+    Parameters:
+      worker: The worker's name.
+      schedule: A dictionary with structure schedule[shop][day][shift] = list of workers.
+      shift_availability: A dictionary with keys (shop, day, shift) indicating if the shift is open.
+      day_names: List of day names (e.g. ["Monday", "Tuesday", ...]).
+      shift_names: List of shift names (e.g. ["Morning", "Afternoon"]).
+      max_consec: Maximum allowed consecutive shifts (as individual shift slots).
+      shop_names: List of shop names.
+
+    Returns:
+      A string with the day and shift (e.g., "Thursday Afternoon") when the worker is forced off next week,
+      or a message if no forced rest occurs within a week.
     """
-    Count consecutive shift slots (ordered by day then shift)
-    at the end of the current week where the worker was assigned.
-    """
+    # Build the worker's shift assignment list for the week (0 = off, 1 = work)
     shift_slots = []
-    # Create a flattened list of shift slots for the week.
     for day in day_names:
-        for s in shift_names:
-            # Worker is considered “working” in this slot if assigned in any shop.
-            works = any(worker in schedule.get(shop, {}).get(day, {}).get(s, [])
-                        for shop in shop_names)
-            shift_slots.append(1 if works else 0)
-    # Count consecutive ones from the end.
-    count = 0
-    for worked in reversed(shift_slots):
-        if worked:
-            count += 1
+        for shift in shift_names:
+            # Check if the shift is available in any shop
+            available = any(shift_availability.get((shop, day, shift), False) for shop in shop_names)
+            if available:
+                # If available, mark the slot as worked if the worker is assigned in any shop
+                worked = any(worker in schedule.get(shop, {}).get(day, {}).get(shift, []) for shop in shop_names)
+                shift_slots.append(1 if worked else 0)
+            else:
+                # If the shift is closed in all shops, consider it off.
+                shift_slots.append(0)
+    
+    # Count the consecutive worked slots (1's) from the end of the week.
+    L = 0
+    for val in reversed(shift_slots):
+        if val == 1:
+            L += 1
         else:
             break
-    return count
 
-def compute_next_possible_off_day(worker, schedule, day_names, shift_names, shop_names, MAX_CONSECUTIVE_SHIFTS):
-    """
-    Determines the next day (by name) in the following week on which
-    the worker could have a full day off – that is, if they worked
-    continuously until they reach the maximum consecutive shifts allowed.
-    If the very last shift slot of the current week is off, returns Monday.
-    """
-    # Check the last shift slot of the week (e.g. Sunday afternoon).
-    last_day = day_names[-1]
-    last_shift = shift_names[-1]
-    last_slot_worked = any(worker in schedule.get(shop, {}).get(last_day, {}).get(last_shift, [])
-                            for shop in shop_names)
-    if not last_slot_worked:
-        # If the worker already had the last slot off, then next week they can take Monday off.
-        return day_names[0]  # Monday (assuming the week pattern repeats)
-    
-    # Compute how many consecutive shift slots at the end the worker was working.
-    X = compute_consecutive_shifts_at_end(worker, schedule, day_names, shift_names, shop_names)
-    # They can work at most (MAX_CONSECUTIVE_SHIFTS - X) more shift slots before the rule forces a break.
-    allowed = MAX_CONSECUTIVE_SHIFTS - X
-    if allowed <= 0:
-        return day_names[0]
-    
-    shifts_per_day = len(shift_names)  # e.g. 2 shifts per day
-    # Compute the number of full days they could work in next week before the forced off slot.
-    full_days = allowed // shifts_per_day
-    # If there is any remainder, that means the forced off slot would occur during that day.
-    forced_off_day_index = full_days
-    # Cap to the days of the week if needed.
-    if forced_off_day_index >= len(day_names):
-        forced_off_day_index = len(day_names) - 1
-    return day_names[forced_off_day_index]
+    # Determine the (1-indexed) position of the forced off shift in next week.
+    next_week_off_slot = max_consec - L + 1
 
+    # Total number of shift slots per week.
+    slots_per_week = len(day_names) * len(shift_names)
+    if next_week_off_slot > slots_per_week:
+        return "No forced rest within week"
+    
+    # Convert next_week_off_slot (1-indexed) to 0-indexed slot index.
+    slot_index = next_week_off_slot - 1
+    next_day_index = slot_index // len(shift_names)
+    next_shift_index = slot_index % len(shift_names)
+    next_day = day_names[next_day_index]
+    next_shift = shift_names[next_shift_index]
+    return f"{next_day} {next_shift}"
 
 ##############################################
 # Solve Scheduling Problem
@@ -613,15 +583,15 @@ def solve_schedule(shop_names, worker_names, worker_roles, shift_names, day_name
                 "Extra Hours Worked": extra_val / 4.0,
                 "Total Hours Worked": (reg_val + extra_val) / 4.0
             }
-            next_possible_off_day = compute_next_possible_off_day(
-                worker_names[n],
-                schedule,
-                day_names,
-                SHIFT_NAMES,
-                shop_names,
-                MAX_CONSECUTIVE_SHIFTS
-            )
-            summary["Next Possible Off Day"] = next_possible_off_day
+            # next_possible_off_day = compute_next_possible_off_day(
+            #     worker_names[n],
+            #     schedule,
+            #     day_names,
+            #     SHIFT_NAMES,
+            #     shop_names,
+            #     MAX_CONSECUTIVE_SHIFTS
+            # )
+            # summary["Next Possible Off Day"] = next_possible_off_day
 
             worker_summary.append(summary)
         
@@ -629,6 +599,71 @@ def solve_schedule(shop_names, worker_names, worker_roles, shift_names, day_name
         return schedule, worker_summary, statistics
     else:
         return None, None, None
+
+
+# def compute_consecutive_shifts_at_end(worker, schedule, day_names, shift_names, shop_names):
+#     """
+#     Count consecutive shift slots (ordered by day then shift)
+#     at the end of the current week where the worker was assigned.
+#     """
+#     shift_slots = []
+#     # Create a flattened list of shift slots for the week.
+#     for day in day_names:
+#         for s in shift_names:
+#             # The worker is considered "working" in this slot if assigned in any shop.
+#             works = any(worker in schedule.get(shop, {}).get(day, {}).get(s, [])
+#                         for shop in shop_names)
+#             shift_slots.append(1 if works else 0)
+#     # Count consecutive worked slots from the end.
+#     count = 0
+#     for worked in reversed(shift_slots):
+#         if worked:
+#             count += 1
+#         else:
+#             break
+#     return count
+
+# def compute_next_possible_off_day(worker, schedule, day_names, shift_names, shop_names, MAX_CONSECUTIVE_SHIFTS):
+#     """
+#     Determines the next day–shift (as a tuple) in the following week on which
+#     the worker would be forced to have an off slot because they've reached
+#     the maximum consecutive shifts limit.
+
+#     The function calculates the number of consecutive shift slots (ordered as
+#     day-shift pairs) worked at the end of the current week. Then, based on the
+#     remaining shift slots allowed (MAX_CONSECUTIVE_SHIFTS minus the consecutive
+#     shifts already worked), it computes the index of the next forced off slot in
+#     the next week. This index is then mapped to the corresponding day and shift.
+    
+#     For example, if MAX_CONSECUTIVE_SHIFTS = 10 and there are 2 shifts per day,
+#     a worker who worked 3 consecutive shift slots at the end of the week can work
+#     7 additional slots. The forced off slot would then be the 8th slot of next week,
+#     which (with 2 shifts per day) corresponds to Thursday Afternoon.
+#     """
+#     # Get the number of consecutive shift slots worked at the end of the current week.
+#     consecutive_slots = compute_consecutive_shifts_at_end(worker, schedule, day_names, shift_names, shop_names)
+#     # Determine how many additional shift slots the worker can work before a forced off.
+#     allowed_additional = MAX_CONSECUTIVE_SHIFTS - consecutive_slots
+    
+#     # If already at or above the limit, the next off slot is the first slot of next week.
+#     if allowed_additional <= 0:
+#         return day_names[0], shift_names[0]
+    
+#     # The forced off slot in next week is at index 'allowed_additional'
+#     forced_index = allowed_additional  # 0-indexed position among the shift slots in next week.
+#     shifts_per_day = len(shift_names)
+#     forced_day_index = forced_index // shifts_per_day
+#     forced_shift_index = forced_index % shifts_per_day
+    
+#     # Cap indices if they extend beyond the week.
+#     if forced_day_index >= len(day_names):
+#         forced_day_index = len(day_names) - 1
+#         forced_shift_index = len(shift_names) - 1
+
+#     return f"{day_names[forced_day_index]} {shift_names[forced_shift_index]}", 
+
+
+
 
 ##############################################
 # Render Calendars for Worker and Employer
@@ -726,11 +761,11 @@ def main():
             st.success("Optimal schedule found!")
             st.markdown(CALENDAR_CSS, unsafe_allow_html=True)
             
-            st.header("Detailed Worker Timetable (Rows: Worker - Shop)")
+            st.header("Worker Timetable for employer (Rows: Worker - Shop)")
             detailed_html = render_calendar_for_worker(schedule, day_names, shift_names, shop_names, worker_names)
             st.markdown(detailed_html, unsafe_allow_html=True)
             
-            st.header("Shop Timetables and Employer Views")
+            st.header("Shop Timetables for shifts")
             for shop in shop_names:
                 st.subheader(f"Employer Calendar View for {shop}")
                 employer_html = render_calendar_for_employer(schedule, day_names, shift_names, shop, worker_names)
