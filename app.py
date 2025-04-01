@@ -46,17 +46,24 @@ CALENDAR_CSS = """
     width: 100%;
     border-collapse: collapse;
 }
+
+/* Updated header style: dark background with white text */
 .calendar-header {
-    background-color: #f2f2f2;
+    background-color: #333;
+    color: #fff;
     text-align: center;
     padding: 8px;
     border: 1px solid #ddd;
 }
+
+/* Bold the worker names */
 .worker-name-cell {
     font-weight: bold;
     padding: 8px;
     border: 1px solid #ddd;
 }
+
+/* Style for shift pills */
 .shift-pill {
     display: inline-block;
     padding: 4px 8px;
@@ -64,12 +71,16 @@ CALENDAR_CSS = """
     margin: 2px;
     color: #fff;
 }
+
 .morning-pill {
-    background-color: #4caf50;
+    background-color: #5F8B4C;
 }
+
 .afternoon-pill {
-    background-color: #2196f3;
+    background-color: #FF9A9A;
 }
+
+/* Style for shift boxes in employer view */
 .shift-box {
     padding: 4px;
     border-radius: 4px;
@@ -77,8 +88,18 @@ CALENDAR_CSS = """
     color: #fff;
     display: inline-block;
 }
+
+/* Alternate row colors using two very similar shades of green */
+.calendar-table tr:nth-child(odd) {
+    background-color: #505A5B;
+}
+.calendar-table tr:nth-child(even) {
+    background-color: #343F3E;
+}
 </style>
 """
+
+
 
 ##############################################
 # Helper: Global Shop Settings (for all shifts)
