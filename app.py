@@ -304,6 +304,10 @@ def get_parameters():
     worker_allowed_shops = {}
     worker_roles = []  # New list to store the role for each worker
 
+    # Define a scale factor for special worker extra cost.
+    SPECIAL_WORKER_COST_SCALE = 1000000
+    default_normal_ec = 15  # Normal worker default extra cost.
+
     for worker in worker_names:
         with st.sidebar.expander(f"{worker}"):
             allowed = st.multiselect(
@@ -314,18 +318,30 @@ def get_parameters():
             )
             worker_allowed_shops[worker] = allowed
 
+            # For each worker...
             special = st.checkbox(f"{worker} is a Special Worker", value=False, key=f"{worker}_special")
             is_special_worker.append(special)
+
             default_contract = 40
             ch = st.number_input(
                 f"{worker} Contract Hours", value=default_contract, min_value=0, step=1, key=f"{worker}_contract"
             )
-            cr = st.number_input(
-                f"{worker} Conversion Rate ($ per customer)", value=100, min_value=0, step=1, key=f"{worker}_conv"
-            )
-            ec = st.number_input(
-                f"{worker} Extra Cost ($ per extra hour)", value=15, min_value=0, step=1, key=f"{worker}_cost"
-            )
+
+            if not special:
+                default_cr = 100
+                default_ec = default_normal_ec
+                cr = st.number_input(
+                    f"{worker} Conversion Rate ($ per customer)", value=default_cr, min_value=0, step=1, key=f"{worker}_conv"
+                )
+                ec = st.number_input(
+                    f"{worker} Extra Cost ($ per extra hour)", value=default_ec, min_value=0, step=1, key=f"{worker}_cost"
+                )
+            else:
+                st.markdown("**Special Worker settings:** Conversion Rate and Extra Cost are set automatically.")
+                # For special workers, conversion rate is fixed to 0 and extra cost is scaled.
+                cr = 0
+                ec = default_normal_ec * SPECIAL_WORKER_COST_SCALE
+
             leave = {}
             st.markdown("Leave Requests (independent of shop):")
             for d in day_names:
