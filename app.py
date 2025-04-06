@@ -266,7 +266,7 @@ def get_parameters():
             st.markdown("Leave Requests (independent of shop):")
             for d in DAY_NAMES:
                 for s in SHIFT_NAMES:
-                    leave[(d, s)] = st.checkbox(
+                    leave[(d, s)] = st.toggle(
                         f"Leave on {d} {s}",
                         value=False,
                         key=f"{worker}_leave_{d}_{s}"
@@ -456,17 +456,18 @@ def solve_schedule_week(week, parameters, worker_memory):
         return None, None, None, worker_memory
 
 # -----------------------------
-# Updated Rendering Functions with Responsive Wrappers
+# Updated Rendering Functions with Responsive Wrappers and Date Labels
 # -----------------------------
-def render_calendar_for_worker(schedule, day_names, shift_names, shop_names, worker_names):
+def render_calendar_for_worker(schedule, day_names, day_labels, shift_names, shop_names, worker_names):
     def generate_worker_shift_color(index, total):
         hue = int(360 * index / total + 30)
         return f"hsl({hue}, 70%, 65%)"
     
     html = ['<div style="overflow-x: auto;">', '<table class="calendar-table">']
+    # Use day_labels for header display
     header = '<tr><th class="calendar-header">Worker - Shop</th>'
-    for day in day_names:
-        header += f'<th class="calendar-header">{day}</th>'
+    for label in day_labels:
+        header += f'<th class="calendar-header">{label}</th>'
     header += '</tr>'
     html.append(header)
     
@@ -480,21 +481,22 @@ def render_calendar_for_worker(schedule, day_names, shift_names, shop_names, wor
                     if worker in assigned:
                         color = generate_worker_shift_color(s_index, len(shift_names))
                         cell_html += f'<div class="shift-pill" style="background-color: {color};">{s}</div>'
+                    # else leave empty
                 row += f'<td>{cell_html}</td>'
             row += '</tr>'
             html.append(row)
     html.append('</table></div>')
     return "\n".join(html)
 
-def render_calendar_for_employer(schedule, day_names, shift_names, shop, worker_names):
+def render_calendar_for_employer(schedule, day_names, day_labels, shift_names, shop, worker_names):
     def generate_pastel_color(i, total):
         hue = int(360 * i / total)
         return f"hsl({hue}, 60%, 65%)"
     worker_colors = {worker: generate_pastel_color(i, len(worker_names)) for i, worker in enumerate(worker_names)}
     
     html = ['<div style="overflow-x: auto;">', '<table class="calendar-table">', '<thead>', '<tr><th class="calendar-header"></th>']
-    for day in day_names:
-        html.append(f'<th class="calendar-header">{day}</th>')
+    for label in day_labels:
+        html.append(f'<th class="calendar-header">{label}</th>')
     html.append('</tr></thead><tbody>')
     for s in shift_names:
         row = f'<tr><td class="worker-name-cell">{s}</td>'
@@ -511,7 +513,7 @@ def render_calendar_for_employer(schedule, day_names, shift_names, shop, worker_
     return "\n".join(html)
 
 # -----------------------------
-# Main Application with Week Navigation
+# Main Application with Week Navigation and Date Integration
 # -----------------------------
 def main():
     st.set_page_config(page_title="Rolling Horizon Multi-Week Scheduling", layout="wide")
@@ -519,8 +521,13 @@ def main():
     st.markdown('<meta name="viewport" content="width=device-width, initial-scale=1.0">', unsafe_allow_html=True)
     st.title("Rolling Horizon Multi-Week Shift Scheduling Optimization")
     st.markdown("This application computes the optimal schedule week by week, carrying over previous weeks’ assignments.")
-    st.sidebar.header("Worker Parameters")
-    NUM_WEEKS = st.sidebar.number_input("Number of Planning Weeks", min_value=1, max_value=10, value=4, step=1)
+    
+    # User selects a day; then compute the Monday of that week.
+    selected_date = st.sidebar.date_input("Select first day", value="today", min_value="today")
+    first_monday = selected_date - datetime.timedelta(days=selected_date.weekday())
+
+    # Add parameter for the number of planning weeks.
+    NUM_WEEKS = st.sidebar.number_input("Number of Planning Weeks", min_value=1, max_value=6, value=4, step=1)
     
     parameters = get_parameters()
     
@@ -568,21 +575,26 @@ def main():
             st.button("Next Week >>", on_click=next_week, key="next_week",
                     disabled=(current_week >= num_weeks - 1))
         
-        # Use the updated current_week from session_state
-        current_week = st.session_state.current_week
-        week_schedule = st.session_state['weekly_schedules'][current_week]
-
-        st.markdown(CALENDAR_CSS, unsafe_allow_html=True)
-        st.header(f"Week {current_week+1} Schedule")
+        # Calculate the dates for the current week using the computed first Monday.
+        week_start_date = first_monday + datetime.timedelta(weeks=current_week)
+        week_end_date = week_start_date + datetime.timedelta(days=6)
+        st.header(f"Week {current_week+1} Schedule: {week_start_date.strftime('%b %d, %Y')} - {week_end_date.strftime('%b %d, %Y')}")
         
+        # Create display labels for each day (starting on Monday) with month in abbreviated text.
+        week_dates = [week_start_date + datetime.timedelta(days=i) for i in range(7)]
+        day_labels = [f"{day} {date.strftime('%b %d')}" for day, date in zip(DAY_NAMES, week_dates)]
+        
+        week_schedule = st.session_state['weekly_schedules'][current_week]
+        
+        st.markdown(CALENDAR_CSS, unsafe_allow_html=True)
         st.subheader("Worker Timetable")
-        detailed_html = render_calendar_for_worker(week_schedule, parameters[3], parameters[2], parameters[0], parameters[1])
+        detailed_html = render_calendar_for_worker(week_schedule, DAY_NAMES, day_labels, SHIFT_NAMES, SHOP_NAMES, parameters[1])
         st.markdown(detailed_html, unsafe_allow_html=True)
         
         st.subheader("Shop Timetables")
         for shop in parameters[0]:
             st.markdown(f"**{shop}**")
-            employer_html = render_calendar_for_employer(week_schedule, parameters[3], parameters[2], shop, parameters[1])
+            employer_html = render_calendar_for_employer(week_schedule, DAY_NAMES, day_labels, SHIFT_NAMES, shop, parameters[1])
             st.markdown(employer_html, unsafe_allow_html=True)
         
         st.header("Worker Summary")
