@@ -213,7 +213,6 @@ def get_day_shift_overrides_per_shop(shop_capacity_ui, week_key="default"):
                             }
     return day_shift_overrides
 
-
 def get_parameters(week_key="default"):
     shop_names = SHOP_NAMES
     day_names = DAY_NAMES
@@ -353,6 +352,7 @@ def get_parameters(week_key="default"):
 # -----------------------------
 # Single Week Solver (Rolling Horizon)
 # -----------------------------
+@st.cache_data
 def solve_schedule_week(week, parameters, worker_memory):
     (shop_names, worker_names, shift_names, day_names, shift_availability, 
      shift_regular_time, shift_extra_time, shift_forecasts, min_workers_dict, 
@@ -526,6 +526,7 @@ def solve_schedule_week(week, parameters, worker_memory):
 # -----------------------------
 # Rendering Functions
 # -----------------------------
+@st.cache_data
 def render_calendar_for_worker(schedule, day_names, day_labels, shift_names, shop_names, worker_names):
     def generate_worker_shift_color(index, total):
         hue = int(360 * index / total + 30)
@@ -555,6 +556,7 @@ def render_calendar_for_worker(schedule, day_names, day_labels, shift_names, sho
     html.append('</table></div>')
     return "\n".join(html)
 
+@st.cache_data
 def render_calendar_for_employer(schedule, day_names, day_labels, shift_names, shop, worker_names):
     def generate_pastel_color(i, total):
         hue = int(360 * i / total)
