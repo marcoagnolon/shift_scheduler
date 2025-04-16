@@ -1,52 +1,84 @@
-#v2
 import streamlit as st
 import pandas as pd
 from ortools.sat.python import cp_model
 import datetime
 
-# -----------------------------
-# Global Constants and Defaults
-# -----------------------------
-SHOP_NAMES = ["Piazza Milano", "Piazza Aurora"]
-SHIFT_NAMES = ["Morning", "Afternoon"]
-DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+# -----------------------------------------------------------------------------
+# ❶  Location‑specific presets
+# -----------------------------------------------------------------------------
+LOCATION_PRESETS = {
+    "Jesolo": dict(
+        SHOP_NAMES=["Piazza Milano", "Piazza Aurora"],
+        SHIFT_NAMES=["Morning", "Afternoon"],
+        DAY_NAMES=["Monday", "Tuesday", "Wednesday", "Thursday",
+                   "Friday", "Saturday", "Sunday"],
+        DEFAULT_SHOP_SHIFT_SCHEDULE={
+            "Piazza Milano": {
+                "Morning":  (datetime.time(8, 30),  datetime.time(12, 45)),
+                "Afternoon":(datetime.time(15, 30), datetime.time(21,  0)),
+            },
+            "Piazza Aurora": {
+                "Morning":  (datetime.time(8, 30),  datetime.time(12, 45)),
+                "Afternoon":(datetime.time(15, 30), datetime.time(21,  0)),
+            },
+        },
+        DEFAULT_SHOP_CAPACITY={
+            "Piazza Milano": {"min": 4, "max": 6},
+            "Piazza Aurora": {"min": 2, "max": 3},
+        },
+        DEFAULT_SHOP_SHIFT_FORECAST={
+            "Piazza Milano": {"Morning": 50, "Afternoon": 50},
+            "Piazza Aurora": {"Morning": 40, "Afternoon": 40},
+        },
+        WORKERS_STRING="Chiara, Elisabetta, Erika, Claudietta, Kety, Luana, Irene, Michela",
+    ),
 
-DEFAULT_SHOP_SHIFT_SCHEDULE = {
-    "Piazza Milano": {
-         "Morning": (datetime.time(8, 30), datetime.time(12, 45)),
-         "Afternoon": (datetime.time(15, 30), datetime.time(21, 0))
-    },
-    "Piazza Aurora": {
-         "Morning": (datetime.time(8, 30), datetime.time(12, 45)),
-         "Afternoon": (datetime.time(15, 30), datetime.time(21, 0))
-    }
+    "San Dona": dict(
+        SHOP_NAMES=["San Dona"],
+        SHIFT_NAMES=["Morning", "Afternoon"],
+        DAY_NAMES=["Monday", "Tuesday", "Wednesday", "Thursday",
+                   "Friday", "Saturday", "Sunday"],
+        DEFAULT_SHOP_SHIFT_SCHEDULE={
+            "San Dona": {
+                "Morning":  (datetime.time(8, 30),  datetime.time(12, 45)),
+                "Afternoon":(datetime.time(15, 30), datetime.time(21,  0)),
+            },
+        },
+        DEFAULT_SHOP_CAPACITY={
+            "San Dona": {"min": 4, "max": 6},
+        },
+        DEFAULT_SHOP_SHIFT_FORECAST={
+            "San Dona": {"Morning": 50, "Afternoon": 60},
+        },
+        WORKERS_STRING="Elena, Gaia, Paola C, Paola P, Elisa, Veronica, Anna",
+    ),
 }
 
-DEFAULT_SHOP_CAPACITY = {
-    "Piazza Milano": {"min": 4, "max": 6},
-    "Piazza Aurora": {"min": 2, "max": 3}
-}
+# -----------------------------------------------------------------------------
+# ❷  Global constants – placeholders, overwritten after the user chooses site
+# -----------------------------------------------------------------------------
+SHOP_NAMES = []
+SHIFT_NAMES = []
+DAY_NAMES = []
 
-DEFAULT_SHOP_SHIFT_FORECAST = {
-    "Piazza Milano": {
-         "Morning": 50,
-         "Afternoon": 50
-    },
-    "Piazza Aurora": {
-         "Morning": 40,
-         "Afternoon": 40
-    }
-}
+DEFAULT_SHOP_SHIFT_SCHEDULE = {}
+DEFAULT_SHOP_CAPACITY = {}
+DEFAULT_SHOP_SHIFT_FORECAST = {}
 
+workers_name = ""  # will be set dynamically
+
+# -----------------------------------------------------------------------------
+# ❸  Other global (site‑independent) constants
+# -----------------------------------------------------------------------------
 MIN_REGULAR_SHIFT_DURATION_HOURS = 4
 MAX_REGULAR_SHIFT_DURATION_HOURS = 8
 MIN_TIME_UNIT = 15
 MAX_CONSECUTIVE_SHIFTS = 10  # Maximum consecutive shift slots (within one week)
 MAX_CONSECUTIVE_DAYS = 8     # Maximum consecutive days allowed
 
-# -----------------------------
-# CSS for Calendar Rendering
-# -----------------------------
+# -----------------------------------------------------------------------------
+# ❹  CSS for the calendars
+# -----------------------------------------------------------------------------
 CALENDAR_CSS = """
 <style>
 /* Base Styles for Calendar Table */
@@ -114,9 +146,9 @@ CALENDAR_CSS = """
 </style>
 """
 
-# -----------------------------
-# Helper: Copy Parameters from one week to the next
-# -----------------------------
+# -----------------------------------------------------------------------------
+# ❺  Helper to copy the sidebar inputs from one week to the next
+# -----------------------------------------------------------------------------
 def copy_week_parameters(from_week, to_week):
     prefix_from = f"week_{from_week}_"
     prefix_to = f"week_{to_week}_"
@@ -126,9 +158,9 @@ def copy_week_parameters(from_week, to_week):
             if new_key not in st.session_state:
                 st.session_state[new_key] = st.session_state[key]
 
-# -----------------------------
-# Parameter Gathering Functions
-# -----------------------------
+# -----------------------------------------------------------------------------
+# ❻  Sidebar parameter‑gathering helpers  (unchanged from the original app)
+# -----------------------------------------------------------------------------
 def get_shop_settings_per_shop(week_key="default"):
     shop_shift_schedule_ui = {}
     shop_capacity_ui = {}
@@ -145,24 +177,25 @@ def get_shop_settings_per_shop(week_key="default"):
                 close_key = f"{week_key}_{shop}_{shift}_close"
                 min_key = f"{week_key}_{shop}_{shift}_min"
                 open_time = st.time_input(
-                    f"{shop} {shift} Opening Time", 
+                    f"{shop} {shift} Opening Time",
                     value=st.session_state.get(open_key, default_open),
                     key=open_key
                 )
                 close_time = st.time_input(
-                    f"{shop} {shift} Closing Time", 
+                    f"{shop} {shift} Closing Time",
                     value=st.session_state.get(close_key, default_close),
                     key=close_key
                 )
                 min_workers = st.number_input(
-                    f"{shop} {shift} Minimum Workers", 
-                    value=st.session_state.get(min_key, default_min_workers), 
-                    min_value=0, step=1, 
+                    f"{shop} {shift} Minimum Workers",
+                    value=st.session_state.get(min_key, default_min_workers),
+                    min_value=0, step=1,
                     key=min_key
                 )
                 shop_shift_schedule_ui[shop][shift] = (open_time, close_time)
                 shop_capacity_ui[shop][shift] = min_workers
     return shop_shift_schedule_ui, shop_capacity_ui
+
 
 def get_day_shift_overrides_per_shop(shop_capacity_ui, week_key="default"):
     day_shift_overrides = {}
@@ -174,13 +207,13 @@ def get_day_shift_overrides_per_shop(shop_capacity_ui, week_key="default"):
                 for shift in SHIFT_NAMES:
                     override_key = f"{week_key}_{shop}_{day}_{shift}_override"
                     override = st.checkbox(
-                        f"Override settings for {shop} {day} – {shift}?", 
+                        f"Override settings for {shop} {day} – {shift}?",
                         key=override_key
                     )
                     if override:
                         closed_key = f"{week_key}_{shop}_{day}_{shift}_closed"
                         is_closed = st.checkbox(
-                            f"Mark {shop} {day} – {shift} as closed?", 
+                            f"Mark {shop} {day} – {shift} as closed?",
                             key=closed_key
                         )
                         if is_closed:
@@ -190,13 +223,13 @@ def get_day_shift_overrides_per_shop(shop_capacity_ui, week_key="default"):
                             close_key = f"{week_key}_{shop}_{day}_{shift}_close"
                             min_key = f"{week_key}_{shop}_{day}_{shift}_min"
                             override_open = st.time_input(
-                                f"{shop} {day} – {shift} Opening Time", 
-                                value=st.session_state.get(open_key, datetime.time(8, 30)), 
+                                f"{shop} {day} – {shift} Opening Time",
+                                value=st.session_state.get(open_key, datetime.time(8, 30)),
                                 key=open_key
                             )
                             override_close = st.time_input(
-                                f"{shop} {day} – {shift} Closing Time", 
-                                value=st.session_state.get(close_key, datetime.time(21, 0)), 
+                                f"{shop} {day} – {shift} Closing Time",
+                                value=st.session_state.get(close_key, datetime.time(21, 0)),
                                 key=close_key
                             )
                             override_min_workers = st.number_input(
@@ -213,39 +246,41 @@ def get_day_shift_overrides_per_shop(shop_capacity_ui, week_key="default"):
                             }
     return day_shift_overrides
 
+
 def get_parameters(week_key="default"):
-    shop_names = SHOP_NAMES
-    day_names = DAY_NAMES
+    # ─────── Shop / shift settings ───────
     shop_shift_schedule_ui, shop_capacity_ui = get_shop_settings_per_shop(week_key=week_key)
     day_shift_overrides = get_day_shift_overrides_per_shop(shop_capacity_ui, week_key=week_key)
-    
-    shift_availability = {}   # True if the shop/day/shift is active; False if closed.
-    shift_regular_time = {}   # Regular work time in quarter-hour increments.
-    shift_extra_time = {}     # Extra time beyond the regular period.
-    min_workers_dict = {}     # Minimum required workers per shop/day/shift.
-    shift_forecasts = {}      # Customer forecast per shop/day/shift.
+
+    # Dicts we return for the solver
+    shift_availability = {}
+    shift_regular_time = {}
+    shift_extra_time = {}
+    min_workers_dict = {}
+    shift_forecasts = {}
+
     min_duration_minutes = MIN_REGULAR_SHIFT_DURATION_HOURS * 60
     max_duration_minutes = MAX_REGULAR_SHIFT_DURATION_HOURS * 60
-    
-    for shop in shop_names:
-        for day in day_names:
+
+    for shop in SHOP_NAMES:
+        for day in DAY_NAMES:
             for shift in SHIFT_NAMES:
+                # Closed?
                 if (shop, day, shift) in day_shift_overrides:
-                    override_values = day_shift_overrides[(shop, day, shift)]
-                    if override_values.get("closed", False):
+                    override_vals = day_shift_overrides[(shop, day, shift)]
+                    if override_vals.get("closed", False):
                         shift_availability[(shop, day, shift)] = False
                         min_workers_dict[(shop, day, shift)] = 0
                         shift_forecasts[(shop, day, shift)] = 0
                         shift_regular_time[(shop, day, shift)] = 0
                         shift_extra_time[(shop, day, shift)] = 0
                         continue
-                    else:
-                        start_time = override_values["open_time"]
-                        end_time = override_values["close_time"]
-                        min_workers_override = override_values["min_workers"]
-                        shift_availability[(shop, day, shift)] = True
+                    start_time = override_vals["open_time"]
+                    end_time = override_vals["close_time"]
+                    min_workers_override = override_vals["min_workers"]
+                    shift_availability[(shop, day, shift)] = True
                 else:
-                    start_time, end_time = shop_shift_schedule_ui[shop][shift]
+                    start_time, end_time = DEFAULT_SHOP_SHIFT_SCHEDULE[shop][shift]
                     min_workers_override = shop_capacity_ui[shop][shift]
                     shift_availability[(shop, day, shift)] = True
 
@@ -255,29 +290,35 @@ def get_parameters(week_key="default"):
                     dt_end += datetime.timedelta(days=1)
                 total_minutes = (dt_end - dt_start).seconds // 60
                 if total_minutes < min_duration_minutes:
-                    st.error(f"Invalid time configuration for {shop} {day} – {shift}: duration is {total_minutes/60:.2f} hours, but must be at least {MIN_REGULAR_SHIFT_DURATION_HOURS} hours.")
+                    st.error(f"Invalid time configuration for {shop} {day} – {shift}: "
+                             f"duration is {total_minutes/60:.2f} h, minimum is {MIN_REGULAR_SHIFT_DURATION_HOURS} h.")
                     st.stop()
                 if total_minutes > max_duration_minutes:
-                    st.error(f"Invalid time configuration for {shop} {day} – {shift}: duration is {total_minutes/60:.2f} hours, but must be at greatest {MAX_REGULAR_SHIFT_DURATION_HOURS} hours.")
+                    st.error(f"Invalid time configuration for {shop} {day} – {shift}: "
+                             f"duration is {total_minutes/60:.2f} h, maximum is {MAX_REGULAR_SHIFT_DURATION_HOURS} h.")
                     st.stop()
+
                 total_quarters = total_minutes // MIN_TIME_UNIT
-                if total_quarters > MIN_REGULAR_SHIFT_DURATION_HOURS*(60//MIN_TIME_UNIT):
-                    shift_regular_time[(shop, day, shift)] = MIN_REGULAR_SHIFT_DURATION_HOURS*(60//MIN_TIME_UNIT)
-                    shift_extra_time[(shop, day, shift)] = total_quarters - MIN_REGULAR_SHIFT_DURATION_HOURS*(60//MIN_TIME_UNIT)
+                regular_quarters = MIN_REGULAR_SHIFT_DURATION_HOURS * (60 // MIN_TIME_UNIT)
+                if total_quarters > regular_quarters:
+                    shift_regular_time[(shop, day, shift)] = regular_quarters
+                    shift_extra_time[(shop, day, shift)] = total_quarters - regular_quarters
                 else:
                     shift_regular_time[(shop, day, shift)] = total_quarters
                     shift_extra_time[(shop, day, shift)] = 0
+
                 min_workers_dict[(shop, day, shift)] = min_workers_override
                 shift_forecasts[(shop, day, shift)] = DEFAULT_SHOP_SHIFT_FORECAST[shop][shift]
-    
+
+    # ─────── Worker‑side inputs ───────
     worker_names_key = f"{week_key}_worker_names"
     worker_names_str = st.sidebar.text_input(
         "Worker Names (comma separated)",
-        value=st.session_state.get(worker_names_key, "Chiara, Elisabetta, Erika, Claudia, Kety, Luana, Irene, Michela"),
+        value=st.session_state.get(worker_names_key, workers_name),
         key=worker_names_key
     )
     worker_names = [w.strip() for w in worker_names_str.split(",") if w.strip()]
-    
+
     st.sidebar.header("Worker Parameters")
     contract_hours = []
     conversion_rate = []
@@ -286,41 +327,54 @@ def get_parameters(week_key="default"):
     is_special_worker = []
     worker_allowed_shops = {}
     worker_roles = []
-    SPECIAL_WORKER_COST_SCALE = 1000000
+
+    SPECIAL_WORKER_COST_SCALE = 1_000_000
     default_normal_ec = 15
+
     for worker in worker_names:
         with st.sidebar.expander(f"{worker}", expanded=False):
             allowed_key = f"{week_key}_{worker}_shops"
             allowed = st.multiselect(
                 f"Select shops where {worker} can work",
-                options=shop_names,
-                default=st.session_state.get(allowed_key, shop_names),
+                options=SHOP_NAMES,
+                default=st.session_state.get(allowed_key, SHOP_NAMES),
                 key=allowed_key
             )
             worker_allowed_shops[worker] = allowed
+
             special_key = f"{week_key}_{worker}_special"
-            special = st.checkbox(f"{worker} is a Special Worker", value=st.session_state.get(special_key, False), key=special_key)
+            special = st.checkbox(f"{worker} is a Special Worker",
+                                  value=st.session_state.get(special_key, False),
+                                  key=special_key)
             is_special_worker.append(special)
+
             default_contract = 40
             contract_key = f"{week_key}_{worker}_contract"
             ch = st.number_input(
-                f"{worker} Contract Hours", value=st.session_state.get(contract_key, default_contract), min_value=0, step=1, key=contract_key
+                f"{worker} Contract Hours",
+                value=st.session_state.get(contract_key, default_contract),
+                min_value=0, step=1, key=contract_key
             )
+
             if not special:
                 default_cr = 100
-                default_ec = default_normal_ec
                 conv_key = f"{week_key}_{worker}_conv"
                 cost_key = f"{week_key}_{worker}_cost"
                 cr = st.number_input(
-                    f"{worker} Conversion Rate ($ per customer)", value=st.session_state.get(conv_key, default_cr), min_value=0, step=1, key=conv_key
+                    f"{worker} Conversion Rate ($ per customer)",
+                    value=st.session_state.get(conv_key, default_cr),
+                    min_value=0, step=1, key=conv_key
                 )
                 ec = st.number_input(
-                    f"{worker} Extra Cost ($ per extra hour)", value=st.session_state.get(cost_key, default_ec), min_value=0, step=1, key=cost_key
+                    f"{worker} Extra Cost ($ per extra hour)",
+                    value=st.session_state.get(cost_key, default_normal_ec),
+                    min_value=0, step=1, key=cost_key
                 )
             else:
                 st.markdown("**Special Worker settings:** Conversion Rate is 0 and Extra Cost is scaled.")
                 cr = 0
                 ec = default_normal_ec * SPECIAL_WORKER_COST_SCALE
+
             leave = {}
             st.markdown("Leave Requests (independent of shop):")
             for d in DAY_NAMES:
@@ -331,24 +385,25 @@ def get_parameters(week_key="default"):
                         value=st.session_state.get(leave_key, False),
                         key=leave_key
                     )
+
             role_key = f"{week_key}_{worker}_role"
             role = st.radio(
-                f"{worker} Role", 
+                f"{worker} Role",
                 options=["Pharmacist", "Salesperson"],
-                index=0 if st.session_state.get(role_key, "Pharmacist")=="Pharmacist" else 1,
+                index=0 if st.session_state.get(role_key, "Pharmacist") == "Pharmacist" else 1,
                 key=role_key
             )
+
             worker_roles.append(role)
             contract_hours.append(ch)
             conversion_rate.append(cr)
             extra_cost.append(ec)
             leave_requests[worker] = leave
 
-    return (SHOP_NAMES, worker_names, SHIFT_NAMES, DAY_NAMES, shift_availability, 
-            shift_regular_time, shift_extra_time, shift_forecasts, min_workers_dict, 
+    return (SHOP_NAMES, worker_names, SHIFT_NAMES, DAY_NAMES, shift_availability,
+            shift_regular_time, shift_extra_time, shift_forecasts, min_workers_dict,
             contract_hours, conversion_rate, extra_cost, leave_requests, is_special_worker,
             worker_allowed_shops, worker_roles)
-
 # -----------------------------
 # Single Week Solver (Rolling Horizon)
 # -----------------------------
@@ -586,7 +641,42 @@ def render_calendar_for_employer(schedule, day_names, day_labels, shift_names, s
 # -----------------------------
 def main():
     st.set_page_config(page_title="Rolling Horizon Multi-Week Scheduling", layout="wide")
-    st.markdown('<meta name="viewport" content="width=device-width, initial-scale=1.0">', unsafe_allow_html=True)
+    st.markdown(
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
+        unsafe_allow_html=True,
+    )
+
+    # ────────────────────────────────────────────────────────────────────────
+    # 1️⃣  Location selector (must come BEFORE any helper call)
+    # ────────────────────────────────────────────────────────────────────────
+    site = st.sidebar.radio("Select location", list(LOCATION_PRESETS), index=0)
+
+    # If the user switched site since last run, flush per‑site caches & state
+    if st.session_state.get("active_site") != site:
+        st.cache_data.clear()
+        # Drop objects that are tied to the previous site
+        for k in ["week_solutions", "week_worker_summary", "week_statistics",
+                  "week_parameters", "worker_memory"]:
+            st.session_state.pop(k, None)
+        st.session_state.current_week = 0
+        st.session_state.current_week_solved = False
+        st.session_state.active_site = site
+
+        # remove any *_shops keys that may still reference the old location
+        for k in list(st.session_state):
+            if k.endswith("_shops"):
+                st.session_state.pop(k, None)
+        # wipe any *_worker_names keys that belong to the previous location
+        for k in list(st.session_state):
+            if k.endswith("_worker_names"):
+                st.session_state.pop(k, None)
+
+
+    # Patch **all** location‑specific globals so the old helpers work untouched
+    globals().update(LOCATION_PRESETS[site])
+    global workers_name           # make sure the helper sees it
+    workers_name = WORKERS_STRING
+
     st.title("Rolling Horizon Multi-Week Shift Scheduling Optimization")
     st.markdown("This application computes the optimal schedule week by week, carrying over previous weeks’ assignments.")
     
@@ -599,7 +689,7 @@ def main():
     max_weeks = st.sidebar.number_input(
         "Number of Planning Weeks", 
         min_value=1, max_value=6, 
-        value=st.session_state.get("max_weeks", 4), step=1
+        value=st.session_state.get("max_weeks", 2), step=1
     )
     st.session_state.max_weeks = max_weeks
 
