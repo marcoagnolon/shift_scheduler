@@ -641,15 +641,11 @@ def render_calendar_for_employer(schedule, day_names, day_labels, shift_names, s
 # -----------------------------
 def main():
     st.set_page_config(page_title="Rolling Horizon Multi-Week Scheduling", layout="wide")
-    st.markdown(
-        '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
-        unsafe_allow_html=True,
-    )
-
+    st.sidebar.image('logo_free.png', use_container_width =True)
     # ────────────────────────────────────────────────────────────────────────
     # 1️⃣  Location selector (must come BEFORE any helper call)
     # ────────────────────────────────────────────────────────────────────────
-    site = st.sidebar.radio("Select location", list(LOCATION_PRESETS), index=0)
+    site = st.sidebar.radio("Select location", list(LOCATION_PRESETS), index=0) 
 
     # If the user switched site since last run, flush per‑site caches & state
     if st.session_state.get("active_site") != site:
@@ -677,9 +673,8 @@ def main():
     global workers_name           # make sure the helper sees it
     workers_name = WORKERS_STRING
 
-    st.title("Rolling Horizon Multi-Week Shift Scheduling Optimization")
+    st.title("Q4time: Rolling Horizon Multi-Week Shift Scheduling Optimization")
     st.markdown("This application computes the optimal schedule week by week, carrying over previous weeks’ assignments.")
-    
     # -----------------------------
     # Session State Initialization
     # -----------------------------
